@@ -1,4 +1,4 @@
-# Water-Banance-site-based
+# Water-Balance-Site-Based
 Estimate soil water of a point at of an area of interest
 
 8-day MODIS ET can be downloaded freely from https://e4ftl01.cr.usgs.gov/MOLT/MOD16A2.061/ or directly from GEE
