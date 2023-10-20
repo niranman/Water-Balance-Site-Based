@@ -1,0 +1,256 @@
+---
+title: "Water Balance site-based"
+author: "Niranjan Wimalathunge"
+date: "6/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+### Introduction
+The USYD Soil Water Balance Model (WBM) is a process-based model designed to address soil water dynamics across various depth supports and scalable farmscapes. This multi-layer, knowledge-based model enhances the representation of vertical soil moisture variation. Functioning as an unsaturated model, the WBM allows water to freely and continuously infiltrate through layers in accordance with soil properties determined by the Soil Landscape Grid of Australia (SLGA). The model's layer thickness is defined by SLGA depth intervals. To calculate the saturated volumetric moisture content (θs), corresponding clay, sand, and bulk density values are employed. This calculation is carried out using a pedotransfer function (PTF) developed by Padarian et al. (2014).The soil is assumed to be uniform within each horizontal layer, with water flowing vertically through these layers. As a result, infiltration occurs continuously across all layers, and any excess soil water beyond the 60–100 cm layer is considered deep drainage, lost to the system given the modeling depth of 1m (root zone). Additionally, runoff is assumed to occur only when Layer 0–5 cm and Layer 5–15 cm become saturated.To match the SLGA resolution, both ET and rainfall need to be downscaled to 90 m. The model runs daily on each SLGA raster cell, incorporating the corresponding values for rainfall and evapotranspiration (ET). ET is extracted in layers: first from layer one, and if a deficit persists, it is then drawn from layer 2. This process continues sequentially through subsequent layers. This approach mirrors the general behavior of water extraction by the root systems of crops.
+
+The model inputs are ET (MODIS 500 m), rainfall (SILO 5 km ) and soil (SLGA 90 m), which can be freely downloadable. This tutorial shows as an example to show how to estimate soil water of a point location at 0-100 cm depths of an area of interest.
+
+The model output provides daily estimates for topsoil (0-30 cm), root zone (0-100 cm), and for each layer: 0-5 cm, 5-15 cm, 15-30 cm, 30-60 cm, 60-100 cm, as well as deep drainage soil water estimates.
+
+### Getting Started
+```{r,messages=FALSE,warning=FALSE}
+# load required libraries
+library(raster)
+library(RCurl)
+library(rgdal)
+library(sp)
+library(sf)
+library(mapview)
+```
+
+### Example: Muttama
+
+### Get data
+Use the [link](https://github.com/niranman/Water-Balance-Site-Based) to download the datasets and change the file paths accordingly
+
+Resolution: ET - 90 m, rain - 90 m and soil: 90 m. 
+
+Duration: 01-01-2001 to 31-12-2020.
+
+### Area of interest (soil moisture probe sites in Mattuma catchment)
+```{r}
+#coordinates of required points
+Muttama <- rgdal::readOGR('X:/PRJ-SoilWaterNow/data/Aus/Farms&sites/Muttama/muttamacatchmentnew.shp')
+sites<-read.csv("X:/PRJ-SoilWaterNow/data/Aus/Farms&sites/ProbesSitesMuttama/probesSitesMuttama.csv")
+sites_sf <- st_as_sf(sites, coords = c("Long", "Lat"))
+mapview(Muttama,alpha.regions = 0.2, aplha = 1,legend=F)+mapview(sites_sf,legend=F)
+```
+
+### Model inputs
+Extract values for the corrosponding xy coordinates
+```{r}
+# You can download datasets containing point data in CSV format or raster data in RDS files.
+
+rain<-brick("X:/PRJ-SoilWaterNow/data/Aus/Farms&sites/Muttama/NSWRain.tif")
+ET<-brick("X:/PRJ-SoilWaterNow/data/Aus/Farms&sites/Muttama/MuttamaET2001_2020.tif")
+
+ET<-data.frame(raster::extract(ET,cbind(sites$Long,sites$Lat)))
+rain<-data.frame(raster::extract(rain,cbind(sites$Long,sites$Lat)))
+```
+### Bucket size 
+Establish the bucket sizes for each layer by employing pedotransfer functions
+
+```{r}
+theta <- brick("X:/PRJ-SoilWaterNow/data/Aus/Farms&sites/Muttama/MuttamaSoil.tif")
+names(theta)[1:20]<-c( "BDW_005","BDW_015","BDW_030","BDW_060","BDW_100",
+                       "CLY_005","CLY_015","CLY_030","CLY_060","CLY_100", 
+                       "SLT_005","SLT_015","SLT_030","SLT_060","SLT_100",
+                       "SND_005","SND_015","SND_030","SND_060","SND_100")
+
+fc_005 = 0.4795 - 3.873 * 10^-5 * theta$SND_005 ^2 - 6.701 * 10^-7 * theta$CLY_005 ^2 * theta$SND_005
+fc_015 = 0.4795 - 3.873 * 10^-5 * theta$SND_015 ^2 - 6.701 * 10^-7 * theta$CLY_015 ^2 * theta$SND_015
+fc_030 = 0.4795 - 3.873 * 10^-5 * theta$SND_030 ^2 - 6.701 * 10^-7 * theta$CLY_030 ^2 * theta$SND_030
+fc_060 = 0.4795 - 3.873 * 10^-5 * theta$SND_060 ^2 - 6.701 * 10^-7 * theta$CLY_060 ^2 * theta$SND_060
+fc_100 = 0.4795 - 3.873 * 10^-5 * theta$SND_100 ^2 - 6.701 * 10^-7 * theta$CLY_100 ^2 * theta$SND_100
+
+pwp_005 = -0.1554 - 0.7221 * tanh(0.5 * (-0.9705 - 0.8529 * theta$BDW_005 - 0.00827 *theta$CLY_005 + 0.01994 * theta$SND_005))  + 0.1325 * tanh(0.5 * (3.71 - 3.19 * theta$BDW_005+ 0.01205 * theta$CLY_005 + 0.01617 * theta$SND_005)) + 0.1720 * tanh(0.5 * (-3.94 - 0.5067 * theta$BDW_005 + 0.02158 * theta$CLY_005 + 0.04978 * theta$SND_005)) 
+pwp_015 = -0.1554 - 0.7221 * tanh(0.5 * (-0.9705 - 0.8529 * theta$BDW_015 - 0.00827 *theta$CLY_015 + 0.01994 * theta$SND_015))  + 0.1325 * tanh(0.5 * (3.71 - 3.19 * theta$BDW_015+ 0.01205 * theta$CLY_015 + 0.01617 * theta$SND_015)) + 0.1720 * tanh(0.5 * (-3.94 - 0.5067 * theta$BDW_015 + 0.02158 * theta$CLY_015 + 0.04978 * theta$SND_015)) 
+pwp_030 = -0.1554 - 0.7221 * tanh(0.5 * (-0.9705 - 0.8529 * theta$BDW_030 - 0.00827 *theta$CLY_030 + 0.01994 * theta$SND_030))  + 0.1325 * tanh(0.5 * (3.71 - 3.19 * theta$BDW_030+ 0.01205 * theta$CLY_030 + 0.01617 * theta$SND_030)) + 0.1720 * tanh(0.5 * (-3.94 - 0.5067 * theta$BDW_030 + 0.02158 * theta$CLY_030 + 0.04978 * theta$SND_030)) 
+pwp_060 = -0.1554 - 0.7221 * tanh(0.5 * (-0.9705 - 0.8529 * theta$BDW_060 - 0.00827 *theta$CLY_060 + 0.01994 * theta$SND_060))  + 0.1325 * tanh(0.5 * (3.71 - 3.19 * theta$BDW_060+ 0.01205 * theta$CLY_060 + 0.01617 * theta$SND_060)) + 0.1720 * tanh(0.5 * (-3.94 - 0.5067 * theta$BDW_060 + 0.02158 * theta$CLY_060 + 0.04978 * theta$SND_060)) 
+pwp_100 = -0.1554 - 0.7221 * tanh(0.5 * (-0.9705 - 0.8529 * theta$BDW_100 - 0.00827 *theta$CLY_100 + 0.01994 * theta$SND_100))  + 0.1325 * tanh(0.5 * (3.71 - 3.19 * theta$BDW_100+ 0.01205 * theta$CLY_100 + 0.01617 * theta$SND_100)) + 0.1720 * tanh(0.5 * (-3.94 - 0.5067 * theta$BDW_100 + 0.02158 * theta$CLY_100 + 0.04978 * theta$SND_100)) 
+
+# Residual Theta
+resid_005<- (0.3697 *tanh (-0.0167 * theta$CLY_005 - 0.0259 * theta$SND_005 + 0.5587 * theta$BDW_005 + 1.86) - 
+               0.2543 *tanh (-0.0074 * theta$CLY_005 - 0.0061 * theta$SND_005 + 0.9869 * theta$BDW_005 - 1.47) - 
+               0.2099* tanh (-0.0653 * theta$CLY_005 - 0.0063 * theta$SND_005 - 5.3000 * theta$BDW_005 + 9.40) - 0.2032)^2
+
+resid_015<- (0.3697 *tanh (-0.0167 * theta$CLY_015 - 0.0259 * theta$SND_015 + 0.5587 * theta$BDW_015 + 1.86) - 
+               0.2543 *tanh (-0.0074 * theta$CLY_015 - 0.0061 * theta$SND_015 + 0.9869 * theta$BDW_015 - 1.47) - 
+               0.2099* tanh (-0.0653 * theta$CLY_015 - 0.0063 * theta$SND_015 - 5.3000 * theta$BDW_015 + 9.40) - 0.2032)^2
+
+resid_bucket<-stack(resid_005*50,resid_015*100)
+
+# bucketsize
+bucketSize <-stack((fc_005-resid_005)*50,(fc_015-resid_015)*100,(fc_030-pwp_030)*150,
+                   (fc_060-pwp_060)*300,(fc_100-pwp_100)*400)
+
+bucketSize<-data.frame(raster::extract(bucketSize,cbind(sites$Long,sites$Lat)))
+```
+### The Water balance
+
+```{r,messages=FALSE,warning=FALSE}
+
+result<- array(rep(1, 12*dim(ET)[2]*dim(ET)[1]), dim=c(dim(ET)[1], dim(ET)[2], 12))
+days <- seq(from=as.Date('2001-01-01'), to=as.Date("2020-12-31"),by='days' )
+
+# 1- current day ; 2-previous day 
+# For example, SMA1(0-5 cm) means  today's soil moisture for 0-5 cm layer whereas SMA2 is previous day soil moisture for 0-5 cm layer
+
+for(i in seq_len(dim(result)[1])){
+  SM=0;SMA=c(0,0);SMB=c(0,0);SMC=c(0,0);SMD=c(0,0);SME=c(0,0);runoff=0; DeepD=0
+  SM30=0; SM100=0
+  a=1
+  Etd<-0 # deficit ET
+  
+  for(j in seq_len(dim(result)[2])){
+
+  #bucket1    
+    ETa<-ET[i,a]*0.125
+    
+    SMA[2]=SMA[1]*.8
+    SMA[1]=SMA[1]*.2
+    
+    SMA[1] = SMA[1]+rain[i,a]-ETa
+    
+    if (SMA[1] > 0){ETd=0}
+    if (SMA[1] < 0){ETd=-(SMA[1]);SMA[1]=0}
+    if (SMA[1] > bucketSize[i,1]){SMB[1]= SMB[1]+(SMA[1]-bucketSize[i,1]);SMA[1]=bucketSize[i,1]}
+    
+  #bucket2
+    
+    SMB[2]=SMB[1]*.05
+    SMB[1]=SMB[1]*.95
+    
+    SMB[1] = SMB[1]+SMA[2]-ETd
+    
+    if (SMB[1] > 0){ETd=0}
+    if (SMB[1] < 0){ETd=-(SMB[1]);SMB[1]=0}
+    if (SMB[1]> bucketSize[i,2]){SMC[1]= SMC[1]+(SMB[1]-bucketSize[i,2]);SMB[1]=bucketSize[i,2]}
+    
+  #bucket3
+    SMC[2]=SMC[1]*.05
+    SMC[1]=SMC[1]*.95
+    
+    SMC[1] = SMC[1]+SMB[2]-ETd
+    
+    if (SMC[1] > 0){ETd=0}
+    if (SMC[1] < 0){ETd=-(SMC[1]);SMC[1]=0}
+    if (SMC[1]> bucketSize[i,3]){SMD[1]= SMD[1]+(SMC[1]-bucketSize[i,3]);SMC[1]=bucketSize[i,3]}
+    
+  #bucket4
+    
+    SMD[2]=SMD[1]*.01
+    SMD[1]=SMD[1]*.99
+    
+    SMD[1] = SMD[1]+ SMC[2]-ETd
+    
+    if (SMD[1] > 0){ETd=0}
+    if (SMD[1] < 0){ETd=-(SMD[1]);SMD[1]=0}
+    if (SMD[1]> bucketSize[i,4]){SME[1]= SME[1]+(SMD[1]-bucketSize[i,4]);SMD[1]=bucketSize[i,4]}
+    
+  #bucket5
+    SME[2]=SME[1]*.01
+    SME[1]=SME[1]*.99
+    
+    SME[1] = SME[1]+ SMD[2]-ETd
+    
+    if (SME[1] > 0){ETd=0}
+    if (SME[1] < 0){ETd=-(SME[1]);SME[1]=0}
+    if (SME[1]> bucketSize[i,5]){DeepD = (SME[1]-bucketSize[i,5]);SME[1]=bucketSize[i,5]}
+    
+    DeepD = DeepD +SME[2]  #lost soil moisture (60-100cm(SME)) due to deep drainage
+    SM30=SMA[1]+SMB[1]+SMC[1]
+    SM100=SMA[1]+SMB[1]+SMC[1]+SMD[1]+SME[1]
+    
+    result[i,j,1] = as.character(days[j])
+    result[i,j,2] = SM30
+    result[i,j,3] = SM100
+    result[i,j,4] = rain[i,a]
+    result[i,j,5] = round(ETa,2)
+    result[i,j,6] = rain[i,a]-round(ETa,2)
+    result[i,j,7] = SMA[1] 
+    result[i,j,8] = SMB[1]
+    result[i,j,9] = SMC[1]
+    result[i,j,10] = SMD[1]
+    result[i,j,11] = SME[1]
+    result[i,j,12] = DeepD
+    
+    runoff = 0
+    DeepD = 0
+    ETd = 0
+    a=a+1
+    }
+}
+```
+### Save the output as csv
+
+```{r}
+s<-unique(sites$site)
+for (i in 1:dim(sites)[1]){
+  out<-as.data.frame(result[i,,])
+  colnames(out)[1:12]<- c("date", "SM30", "SM100","rain","ET","Delta","SM0-5","SM5-15","SM15-30","SM30-60","SM60-100","DeepD")
+  write.table(out, file= paste("Yanco_Layer90_SILOrain_modisET_original",s[i],"csv",sep="."), sep=",",row.names=F, col.names=T)
+}
+out[,2:12]<-as.data.frame(apply(out[, 2:12], 2, as.numeric))
+head(out)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
