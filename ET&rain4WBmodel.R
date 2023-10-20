@@ -1,5 +1,6 @@
+## preprocess the MODIS ET 500m and SILO rain 5km
 
-#8-day ET
+#8-day downloaded MODIS ET
 setwd("evapotranspiration/ET2001_2022")
 ET.list <- list.files(pattern =".tif", full.names=F)
 ET.stack<-raster::stack(ET.list)
@@ -33,11 +34,14 @@ f <- function(x) {
   }
   x
 }
-
 dailyET <- calc(sub, f)
-
 ################################
-# daily rain
+# downloaded daily SILO rain
 rain_list <- list.files(path="rain", pattern ="*.nc", full.names=TRUE)
 rain <- raster::stack(rain_list)
+#######################################################################
+# downscale to the SLGA soil years (theta at 90 m resolusion)
+ET<- raster::resample(x=dailyET, y=theta, method = "bilinear")
+rain<- raster::resample(x=rain, y=thata, method = "ngb")
+
 
