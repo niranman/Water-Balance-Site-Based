@@ -1,12 +1,12 @@
 # Water-Balance-Site-Based
-Estimate soil water of a point at of an area of interest
+The water balance model relies on three primary inputs: daily evapotranspiration, rainfall, and bucket size.
 
-8-day MODIS ET can be downloaded freely from https://e4ftl01.cr.usgs.gov/MOLT/MOD16A2.061/ or directly from GEE
+1. Obtain 8-day MODIS evapotranspiration (ET) for free from [USGS website](https://e4ftl01.cr.usgs.gov/MOLT/MOD16A2.061) or directly from Google Earth Engine (GEE).
 
-daily rainfall can be downloaded from https://www.longpaddock.qld.gov.au/silo/gridded-data/
+2. Download daily rainfall data from [Long Paddock website](https://www.longpaddock.qld.gov.au/silo/gridded-data).
 
-soil data can be downloaded from https://www.longpaddock.qld.gov.au/silo/gridded-data/#8-day ET
+3. Access soil data from [eSoil website](https://esoil.io/TERNLandscapes/Public/Pages/SLGA).
 
-use R code: ET&rain4WBmodel.r to create daily datasets from downloaded MODIS ET and SILO rainfall
+Utilise pedotransfer functions with the soil data to derive the bucket sizes for each layer. The bucket represents the amount of water available for plant use. The model incorporates five bucket sizes: 0-5, 5-15, 15-30, 30-60, and 60-100 cm. The top two bucket sizes differ in water holding capacity and residual water. Residual water is the amount retained in soil pores after gravitational drainage, representing the minimum water the soil can retain against gravity. The next three bucket sizes differ between water holding capacity and permanent wilting point. The permanent wilting point is the moisture level in the soil at which plants can no longer extract water.
 
-or else, the model can be tested with the given RDS or CSV datasets .
+To organise daily data for model execution, refer to the provided code "ET&rain4WBmodel.r." Alternatively, run the model using the provided RDS datasets.
